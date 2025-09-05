@@ -19,15 +19,14 @@ class PiCameraClient:
         except:
             return False
     
-    def capture_video_chunk(self, duration=5, output_path='/tmp/video_chunk.mp4'):
+    def capture_image(self, output_path='/tmp/image_capture.jpg'):
         cmd = [
-            'libcamera-vid',
-            '-t', str(duration * 1000),  # duration in milliseconds
+            'libcamera-still',
             '-o', output_path,
             '--width', '640',
             '--height', '480',
-            '--framerate', '30',
-            '--codec', 'h264'
+            '--quality', '85',
+            '--timeout', '1'
         ]
         
         try:
@@ -35,15 +34,15 @@ class PiCameraClient:
             if result.returncode == 0:
                 return output_path
             else:
-                print(f"Error capturing video: {result.stderr}")
+                print(f"Error capturing image: {result.stderr}")
                 return None
         except Exception as e:
-            print(f"Exception during video capture: {e}")
+            print(f"Exception during image capture: {e}")
             return None
     
-    def upload_video(self, video_path, sequence_num):
-        if not os.path.exists(video_path):
-            print(f"Video file not found: {video_path}")
+    def upload_image(self, image_path, sequence_num):
+        if not os.path.exists(image_path):
+            print(f"Image file not found: {image_path}")
             return None
             
         headers = {
@@ -52,8 +51,8 @@ class PiCameraClient:
         }
         
         try:
-            with open(video_path, 'rb') as video_file:
-                files = {'video': video_file}
+            with open(image_path, 'rb') as image_file:
+                files = {'image': image_file}
                 response = requests.post(
                     self.upload_endpoint,
                     files=files,
@@ -71,51 +70,52 @@ class PiCameraClient:
             print(f"Exception during upload: {e}")
             return None
     
-    def cleanup_video_file(self, video_path):
+    def cleanup_image_file(self, image_path):
         try:
-            if os.path.exists(video_path):
-                os.remove(video_path)
+            if os.path.exists(image_path):
+                os.remove(image_path)
         except Exception as e:
-            print(f"Error cleaning up video file: {e}")
+            print(f"Error cleaning up image file: {e}")
     
-    def run_continuous_capture(self, chunk_duration=5, delay_between_chunks=1):
+    def run_continuous_capture(self, fps=2):
         sequence = 0
+        capture_interval = 1.0 / fps  # 0.5 seconds for 2 fps
         
         if not self.check_server_health():
             print("Server health check failed. Please ensure the server is running.")
             return
             
-        print(f"Starting continuous video capture (Camera ID: {self.camera_id})")
-        print(f"Chunk duration: {chunk_duration}s, Server: {self.server_url}")
+        print(f"Starting continuous image capture (Camera ID: {self.camera_id})")
+        print(f"Capture rate: {fps} fps, Server: {self.server_url}")
         
         try:
             while True:
                 sequence += 1
                 timestamp = datetime.now().isoformat()
-                video_path = f'/tmp/video_chunk_{sequence}.mp4'
+                image_path = f'/tmp/image_capture_{sequence}.jpg'
                 
-                print(f"[{timestamp}] Capturing chunk #{sequence}...")
+                print(f"[{timestamp}] Capturing image #{sequence}...")
                 
-                captured_file = self.capture_video_chunk(chunk_duration, video_path)
+                captured_file = self.capture_image(image_path)
                 if captured_file:
-                    print(f"[{timestamp}] Uploading chunk #{sequence}...")
+                    print(f"[{timestamp}] Uploading image #{sequence}...")
                     
-                    result = self.upload_video(captured_file, sequence)
+                    result = self.upload_image(captured_file, sequence)
                     if result:
                         detection_count = result.get('detection_count', 0)
-                        print(f"[{timestamp}] Chunk #{sequence} processed: {detection_count} detections")
+                        print(f"[{timestamp}] Image #{sequence} processed: {detection_count} detections")
                         
                         if detection_count > 0:
                             for detection in result.get('detections', []):
                                 print(f"  - {detection['class']} (confidence: {detection['confidence']:.2f})")
                     else:
-                        print(f"[{timestamp}] Upload failed for chunk #{sequence}")
+                        print(f"[{timestamp}] Upload failed for image #{sequence}")
                     
-                    self.cleanup_video_file(captured_file)
+                    self.cleanup_image_file(captured_file)
                 else:
-                    print(f"[{timestamp}] Failed to capture chunk #{sequence}")
+                    print(f"[{timestamp}] Failed to capture image #{sequence}")
                 
-                time.sleep(delay_between_chunks)
+                time.sleep(capture_interval)
                 
         except KeyboardInterrupt:
             print("\nStopping capture...")
